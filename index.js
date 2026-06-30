@@ -1,8 +1,11 @@
 (() => {
   try { if (window.__deflyGrab) window.__deflyGrab.stop(); } catch (e) {}
   clearInterval(window.__deflyTeamRefresh);
+  if (window.__deflyRaf) cancelAnimationFrame(window.__deflyRaf);
+  document.getElementById("defly-grab-overlay")?.remove();
 
   const TEAM_BASE = 2;
+  const JOIN_DEBOUNCE_MS = 120;
   const cfg = {
     refreshMs: 1,
     gate: true,
@@ -11,6 +14,8 @@
 
   let target = null;
   let lastFire = 0;
+  let wasOpen = false;
+  let hiddenSince = 0;
   let refreshTimer = null;
   let rafId = null;
   let container = null;
@@ -20,8 +25,17 @@
   const $loading = () => document.getElementById("team-choice-loading");
   const $row     = () => document.getElementById("team-choice-buttons");
 
-  const popupOpen = () => { const p = $popup();   return !!p && getComputedStyle(p).display !== "none"; };
-  const loading   = () => { const l = $loading(); return !!l && getComputedStyle(l).display !== "none"; };
+  function shown(el) {
+    if (!el) return false;
+    if (typeof el.checkVisibility === "function")
+      return el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true });
+    if (el.getClientRects().length === 0) return false;
+    const s = getComputedStyle(el);
+    return s.visibility !== "hidden" && parseFloat(s.opacity || "1") !== 0;
+  }
+
+  const panelOpen = () => shown($popup());
+  const loading   = () => shown($loading());
 
   const btnAt = (i) => { const r = $row(); if (!r) return null; const td = r.children[i]; return td ? td.querySelector("button") : null; };
   const available = (i) => { const b = btnAt(i); return !!b && !b.classList.contains("disabled"); };
@@ -36,8 +50,17 @@
     } catch (e) {}
   }
 
+  function stopAll(reason) {
+    clearInterval(refreshTimer);
+    if (window.__deflyTeamRefresh === refreshTimer) window.__deflyTeamRefresh = null;
+    cancelAnimationFrame(rafId);
+    container?.remove();
+    target = null;
+    console.log("%cDefly auto-grab OFF" + (reason ? " (" + reason + ")" : ""), "color:#f55;font-weight:bold");
+  }
+
   refreshTimer = setInterval(() => {
-    if (!popupOpen() || loading()) return;
+    if (!panelOpen() || loading()) return;
     const s = window._deflySocket;
     if (s && s.readyState === WebSocket.OPEN) s.send(new Uint8Array([9]));
 
@@ -49,6 +72,7 @@
   window.__deflyTeamRefresh = refreshTimer;
 
   container = document.createElement("div");
+  container.id = "defly-grab-overlay";
   container.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;";
   document.body.appendChild(container);
 
@@ -80,8 +104,18 @@
   }
 
   function tick() {
-    rafId = requestAnimationFrame(tick);
-    if (!popupOpen()) { container.style.display = "none"; target = null; return; }
+    window.__deflyRaf = rafId = requestAnimationFrame(tick);
+
+    if (!panelOpen()) {
+      if (!wasOpen) { container.style.display = "none"; target = null; return; }
+      if (hiddenSince === 0) hiddenSince = performance.now();
+      container.style.display = "none";
+      if (performance.now() - hiddenSince >= JOIN_DEBOUNCE_MS) stopAll("joined a team");
+      return;
+    }
+
+    wasOpen = true;
+    hiddenSince = 0;
     container.style.display = "";
     for (let i = 0; i < 8; i++) {
       const b = btnAt(i);
@@ -97,24 +131,26 @@
     }
     paint();
   }
-  rafId = requestAnimationFrame(tick);
+  window.__deflyRaf = rafId = requestAnimationFrame(tick);
+
+  window.deflyStop = function () {
+    clearInterval(window.__deflyTeamRefresh);
+    window.__deflyTeamRefresh = null;
+    if (window.__deflyRaf) cancelAnimationFrame(window.__deflyRaf);
+    document.getElementById("defly-grab-overlay")?.remove();
+    console.log("%cDefly auto-grab OFF (killed)", "color:#f55;font-weight:bold");
+  };
 
   window.__deflyGrab = {
     cfg,
     get target() { return target; },
     set target(v) { target = v; paint(); },
-    stop() {
-      clearInterval(refreshTimer);
-      if (window.__deflyTeamRefresh === refreshTimer) window.__deflyTeamRefresh = null;
-      cancelAnimationFrame(rafId);
-      container?.remove();
-      target = null;
-      console.log("%cDefly auto-grab OFF", "color:#f55");
-    }
+    stop() { stopAll(); }
   };
 
   console.log("%cDefly auto-grab ON", "color:#0f0;font-weight:bold;font-size:13px");
   console.log("Click the box over a team to LOCK onto it - it grabs the moment that slot opens.");
-  console.log("Click again / pick another to cancel or switch.    Stop all:  __deflyGrab.stop()");
-  console.log("Aggressive mode (spam the join until you're in):  __deflyGrab.cfg.gate = false");
+  console.log("Click again / pick another to cancel or switch.");
+  console.log("KILL IT ANYTIME - paste:   deflyStop()");
+  console.log("Stops automatically once you join a team.    Aggressive mode:  __deflyGrab.cfg.gate = false");
 })();
