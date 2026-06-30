@@ -1,7 +1,9 @@
 (() => {
-  clearInterval(window.__deflyTeamRefresh);
   if (window.__deflyCtrlRaf) cancelAnimationFrame(window.__deflyCtrlRaf);
+  if (window.__deflyRaf) cancelAnimationFrame(window.__deflyRaf);
+  clearInterval(window.__deflyTeamRefresh);
   document.getElementById("defly-grab-overlay")?.remove();
+  window.__deflyKilled = false;
 
   const TEAM_BASE = 2;
   const cfg = { refreshMs: 1, gate: true, cooldown: 25 };
@@ -16,7 +18,6 @@
   const popupEl   = () => $("choose-team-popup");
   const loadingEl = () => $("team-choice-loading");
   const rowEl     = () => $("team-choice-buttons");
-  const canvasEl  = () => document.querySelector("body > canvas");
 
   function shown(el) {
     if (!el) return false;
@@ -27,7 +28,8 @@
     return s.visibility !== "hidden" && parseFloat(s.opacity || "1") !== 0;
   }
 
-  const onTeamScreen = () => shown(popupEl()) && !shown(canvasEl());
+  const hasJoined    = () => window.__deflyJoined === true || typeof window.PIXIAPP !== "undefined";
+  const onTeamScreen = () => shown(popupEl());
 
   const btnAt = (i) => { const r = rowEl(); if (!r) return null; const td = r.children[i]; return td ? td.querySelector("button") : null; };
   const available = (i) => { const b = btnAt(i); return !!b && !b.classList.contains("disabled"); };
@@ -53,7 +55,8 @@
   function startRefresh() {
     if (refreshTimer) return;
     refreshTimer = setInterval(() => {
-      if (!onTeamScreen()) return;
+      if (window.__deflyKilled) { stopRefresh(); return; }
+      if (hasJoined() || !onTeamScreen()) return;
       if (shown(loadingEl())) return;
       const s = window._deflySocket;
       if (s && s.readyState === WebSocket.OPEN) s.send(new Uint8Array([9]));
@@ -120,25 +123,25 @@
   }
 
   function controller() {
+    if (window.__deflyKilled) { teardown(); return; }
     ctrlRaf = requestAnimationFrame(controller);
     window.__deflyCtrlRaf = ctrlRaf;
-    if (onTeamScreen()) {
-      if (!built) build();
-      position();
-    } else if (built) {
-      teardown();
-    }
+    if (hasJoined()) { window.__deflyJoined = true; if (built) teardown(); return; }
+    if (onTeamScreen()) { if (!built) build(); position(); }
+    else if (built) teardown();
   }
   ctrlRaf = requestAnimationFrame(controller);
   window.__deflyCtrlRaf = ctrlRaf;
 
   window.deflyStop = function () {
+    window.__deflyKilled = true;
     if (window.__deflyCtrlRaf) cancelAnimationFrame(window.__deflyCtrlRaf);
+    if (window.__deflyRaf) cancelAnimationFrame(window.__deflyRaf);
     window.__deflyCtrlRaf = null;
     clearInterval(window.__deflyTeamRefresh);
     window.__deflyTeamRefresh = null;
     document.getElementById("defly-grab-overlay")?.remove();
-    console.log("%cDefly auto-grab KILLED (paste the script again to re-enable)", "color:#f55;font-weight:bold");
+    console.log("%cDefly auto-grab KILLED (refresh the page to fully reset everything)", "color:#f55;font-weight:bold");
   };
 
   window.__deflyGrab = {
@@ -149,8 +152,8 @@
   };
 
   console.log("%cDefly auto-grab ARMED", "color:#0f0;font-weight:bold;font-size:13px");
-  console.log("Overlay + refresh appear ONLY on the team-choice screen, and vanish the moment you're in game.");
+  console.log("Shows ONLY on the team-choice screen before you've entered a game. Once you join, it's gone until you refresh.");
   console.log("On that screen: click a box over a team to LOCK on - it grabs the instant that slot opens.");
-  console.log("KILL IT COMPLETELY - paste:   deflyStop()");
+  console.log("KILL IT NOW - paste:   deflyStop()");
   console.log("Aggressive join spam:  __deflyGrab.cfg.gate = false");
 })();
