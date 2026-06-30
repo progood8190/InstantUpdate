@@ -1,9 +1,45 @@
 (() => {
+  if (window.__deflyInGameWatch) return;
+  window.__deflyInGameWatch = true;
+  window.__deflyInGame = false;
+
+  const $   = (id) => document.getElementById(id);
+  const vis = (el) => !!el && (el.checkVisibility
+    ? el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+    : el.getClientRects().length > 0);
+
+  const gameCanvasUp = () => [...document.querySelectorAll("canvas")].some((c) => {
+    const s = getComputedStyle(c);
+    return s.position === "fixed" && s.display !== "none" && c.width >= innerWidth * 0.5;
+  });
+
+  const inGameNow = () => !vis($("homepage")) && (vis($("fps")) || gameCanvasUp());
+
+  let raf = 0;
+  const mo = new MutationObserver(check);
+
+  function check() {
+    if (window.__deflyInGame || !inGameNow()) return;
+    window.__deflyInGame = true;
+    window.dispatchEvent(new Event("inGame"));
+    try { mo.disconnect(); } catch (e) {}
+    cancelAnimationFrame(raf);
+  }
+
+  mo.observe(document.documentElement, {
+    subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"]
+  });
+  (function tick() { check(); raf = requestAnimationFrame(tick); })();
+})();
+
+(() => {
   if (window.__deflyCtrlRaf) cancelAnimationFrame(window.__deflyCtrlRaf);
   if (window.__deflyRaf) cancelAnimationFrame(window.__deflyRaf);
   clearInterval(window.__deflyTeamRefresh);
   document.getElementById("defly-grab-overlay")?.remove();
   window.__deflyKilled = false;
+
+  addEventListener("inGame", () => { window.__deflyJoined = true; }, { once: true });
 
   const TEAM_BASE = 2;
   const cfg = { refreshMs: 1, gate: true, cooldown: 25 };
@@ -28,7 +64,10 @@
     return s.visibility !== "hidden" && parseFloat(s.opacity || "1") !== 0;
   }
 
-  const hasJoined    = () => window.__deflyJoined === true || typeof window.PIXIAPP !== "undefined";
+  const hasJoined = () =>
+    window.__deflyInGame === true ||
+    window.__deflyJoined === true ||
+    typeof window.PIXIAPP !== "undefined";
   const onTeamScreen = () => shown(popupEl());
 
   const btnAt = (i) => { const r = rowEl(); if (!r) return null; const td = r.children[i]; return td ? td.querySelector("button") : null; };
